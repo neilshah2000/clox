@@ -1,0 +1,6 @@
+aVariable = 4 + 5;
+print(aVariable);
+
+if (aVariable == 10) {
+    b = 15;
+}
