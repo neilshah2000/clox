@@ -8,8 +8,8 @@
 
 typedef struct
 {
-    Chunk *chunk;
-    uint8_t *ip; /* instruction pointer */
+    Chunk *chunk; /* chunk is a sequence of bytecode */
+    uint8_t *ip;  /* instruction pointer */
 
     Value stack[STACK_MAX];
 

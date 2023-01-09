@@ -2,6 +2,8 @@
 #include "chunk.h"
 #include "memory.h"
 
+/* Chunk is a sequence of bytecode */
+
 /* dynamic array starts off completely empty */
 void initChunk(Chunk *chunk)
 {

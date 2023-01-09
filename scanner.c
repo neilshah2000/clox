@@ -12,7 +12,7 @@ typedef struct
     int line;            /* line number for error reporting */
 } Scanner;
 
-// create a single top level scanner so we donbt have to pass around to all the functions
+// create a single top level scanner so we don't have to pass around to all the functions
 Scanner scanner;
 
 void initScanner(const char *source)

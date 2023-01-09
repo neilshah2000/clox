@@ -15,6 +15,7 @@ typedef enum
     OP_RETURN,
 } OpCode;
 
+/* chunk is a sequence of bytecode */
 typedef struct
 {
     int count;

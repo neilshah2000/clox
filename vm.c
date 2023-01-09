@@ -126,6 +126,23 @@ static InterpretResult run()
 
 InterpretResult interpret(const char *source)
 {
-    compile(source);
-    return INTERPRET_OK;
+    // create new empty chunk
+    Chunk chunk;
+    initChunk(&chunk);
+
+    // compiler takes the users program and fills the chunk with bytecode
+    if (!compile(source, &chunk))
+    {
+        freeChunk(&chunk);
+        return INTERPRET_COMPILE_ERROR;
+    }
+
+    // send the completed chunk over to the VM to be executed
+    vm.chunk = &chunk;
+    vm.ip = vm.chunk->code;
+
+    InterpretResult result = run();
+
+    freeChunk(&chunk);
+    return result;
 }
