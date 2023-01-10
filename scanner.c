@@ -214,7 +214,7 @@ static Token number()
 
 static Token string()
 {
-    while (peek() != '"' && isAtEnd())
+    while (peek() != '"' && !isAtEnd())
     {
         if (peek() == '\n')
             scanner.line++;
