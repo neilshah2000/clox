@@ -21,14 +21,18 @@ typedef enum
 struct Obj
 {
     ObjType type;
-    struct Obj *next;
+    struct Obj *next; /* make it a linked list so we can reclaim all the memory later */
 };
 
+/*
+    Object of type string, living on the heap
+*/
 struct ObjString
 {
-    Obj obj;    // nested Obj struct means the state all Objs share is stored right here
-    int length; // tells us the number of bytes in the array without walking the character string for the null terminator
+    Obj obj;    /* nested Obj struct means the state all Objs share is stored right here */
+    int length; /* tells us the number of bytes in the array without walking the character string for the null terminator */
     char *chars;
+    uint32_t hash; /* cache the hash value (can do because strings are immutable in Lox) */
 };
 
 ObjString *takeString(char *chars, int length);

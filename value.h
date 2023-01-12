@@ -16,15 +16,21 @@ typedef enum
     VAL_OBJ,
 } ValueType;
 
+
+/*
+    Every Lox value that you can store in a variable or return from an expression will be a value.
+    For small fixed size types, like numbers, the payload is stored directly inside the Value struct itself.
+    If the object is larger, it lives on the heap, Then the Value's payload is a pointer to that blob of memory
+*/
 typedef struct
 {
     ValueType type;
     union
     {
-        bool boolean;
+        bool boolean;   /* small fixed-size types store directly */ 
         double number;
-        Obj *obj;
-    } as; // 'as' so it reads nicely when you pull various values out
+        Obj *obj;       /* pointer to memory on the heap */
+    } as;               /* 'as' so it reads nicely when you pull various values out */ 
 } Value;
 
 ///////////// helpful macros for working with objects //////////////////

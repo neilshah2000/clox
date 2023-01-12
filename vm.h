@@ -2,6 +2,7 @@
 #define clox_vm_h
 
 #include "chunk.h"
+#include "table.h"
 #include "value.h"
 
 #define STACK_MAX 256
@@ -15,6 +16,7 @@ typedef struct
 
     /* points one past the top ie where the next value will go */
     Value *stackTop; /* direct pointer faster than index */
+    Table strings;   /* hash table of all strings. To support string interning */
     Obj *objects;    /* linked list of all the objects on the heap */
 } VM;
 
