@@ -168,6 +168,23 @@ static InterpretResult run()
             pop();
             break;
         }
+        case OP_GET_LOCAL:
+        {
+            // we got the slot from the locals array at compile time and stored in the single-byte operand
+            uint8_t slot = READ_BYTE();
+            push(vm.stack[slot]);
+            break;
+        }
+        case OP_SET_LOCAL:
+        {
+            // we got the slot from the locals array at compile time and stored in the single-byte operand
+            uint8_t slot = READ_BYTE();
+            // take the assigned value from top of stack and store it in the slot of teh local variable
+            // does not pop the stack. assignment is an expression, and expressions always produce a value
+            // so leaves that value on the top of the stack
+            vm.stack[slot] = peek(0);
+            break;
+        }
         case OP_GET_GLOBAL:
         {
             // pulls the constant table index from the instructions operand and gets the variable name

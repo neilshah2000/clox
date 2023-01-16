@@ -10,8 +10,10 @@ typedef enum
     OP_NIL,
     OP_TRUE,
     OP_FALSE,
-    OP_POP, // instruction pops the top value off the stack and forgets it
-    OP_GET_GLOBAL,
+    OP_POP,        // instruction pops the top value off the stack and forgets it
+    OP_GET_LOCAL,  // getting local variables
+    OP_SET_LOCAL,  // settign local variables
+    OP_GET_GLOBAL, // getting global variables
     OP_DEFINE_GLOBAL,
     OP_SET_GLOBAL,
     OP_EQUAL,
