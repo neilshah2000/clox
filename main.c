@@ -67,6 +67,9 @@ static char *readFile(const char *path)
 static void runFile(const char *path)
 {
     char *source = readFile(path);
+    printf("\nsource code\n");
+    printf("%s\n", source);
+    printf("\nstarting interpret\n");
     InterpretResult result = interpret(source);
 
     // only free after interpret has run as all tokens refer to this string so we need to keep it around

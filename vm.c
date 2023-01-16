@@ -39,11 +39,13 @@ void initVM()
 {
     resetStack();
     vm.objects = NULL;
+    initTable(&vm.globals);
     initTable(&vm.strings);
 }
 
 void freeVM()
 {
+    freeTable(&vm.globals);
     freeTable(&vm.strings);
     freeObjects();
 }
@@ -89,12 +91,17 @@ static void concatenate()
     push(OBJ_VAL(result));
 }
 
-/* beating heart of the VM */
-/* 90% of program execution spent here */
+/*
+    beating heart of the VM
+    90% of program execution spent here
+    Controls how instructions are executed at runtime
+*/
 static InterpretResult run()
 {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+// reads a one byte operand from the bytecode chunk. Treats as an index into the chunks constants table and reads the string at that index
+#define READ_STRING() AS_STRING(READ_CONSTANT())
 
 // binary operator takes 2 operands so it pops twice
 // first pop is second operand
@@ -154,6 +161,47 @@ static InterpretResult run()
         case OP_FALSE:
         {
             push(BOOL_VAL(false));
+            break;
+        }
+        case OP_POP:
+        {
+            pop();
+            break;
+        }
+        case OP_GET_GLOBAL:
+        {
+            // pulls the constant table index from the instructions operand and gets the variable name
+            ObjString *name = READ_STRING();
+            Value value;
+            if (!tableGet(&vm.globals, name, &value))
+            {
+                runtimeError("Undefined variable '%s'.", name->chars);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            push(value); // take the value and push it onto the stack
+            break;
+        }
+        case OP_DEFINE_GLOBAL:
+        {
+            ObjString *name = READ_STRING();
+            tableSet(&vm.globals, name, peek(0));
+            pop();
+            break;
+        }
+        case OP_SET_GLOBAL:
+        {
+            ObjString *name = READ_STRING();
+            if (tableSet(&vm.globals, name, peek(0)))
+            {
+                // tableSet stores the global variable even if not previously defined
+                // so we take care to delete the zombie value
+                tableDelete(&vm.globals, name);
+                runtimeError("Undefined variable '%s'.", name->chars);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            // does not pop a value off the stack
+            // assigment is an expression so it needs to leave that value there in case
+            // the assignment is nested in some larger expression
             break;
         }
         case OP_EQUAL:
@@ -222,10 +270,20 @@ static InterpretResult run()
             push(NUMBER_VAL(-AS_NUMBER(pop())));
             break;
         }
-        case OP_RETURN:
+        case OP_PRINT:
         {
+            // when the interpreter reaches this instruction it has already executed the code for the expression,
+            // leaving the result on top of the stack
             printValue(pop());
             printf("\n");
+            printf("\n----- printed value-----\n");
+            break;
+        }
+        case OP_RETURN:
+        {
+            // printValue(pop());
+            printf("\n\nExit Interpreter\n");
+            // Exit interpreter.
             return INTERPRET_OK;
         }
         }
@@ -233,6 +291,7 @@ static InterpretResult run()
 
 #undef READ_BYTE
 #undef READ_CONSTANT
+#undef READ_STRING
 #undef BINARY_OP
 }
 
@@ -253,6 +312,7 @@ InterpretResult interpret(const char *source)
     vm.chunk = &chunk;
     vm.ip = vm.chunk->code;
 
+    printf("\nstart the VM and run the bytecode chunk\n");
     InterpretResult result = run();
 
     freeChunk(&chunk);

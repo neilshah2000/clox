@@ -41,7 +41,7 @@ typedef enum
 } Precedence;
 
 // hide syntax for function pointer types behind typedef
-typedef void (*ParseFn)();
+typedef void (*ParseFn)(bool canAssign);
 
 typedef struct
 {
@@ -135,6 +135,25 @@ static void consume(TokenType type, const char *message)
     errorAtCurrent(message);
 }
 
+// return true if the current token has the given type
+static bool check(TokenType type)
+{
+    return parser.current.type == type;
+}
+
+/*
+    If the current token has the given type,
+    we consume the token and return true,
+    Otherwise leave alone and return false.
+*/
+static bool match(TokenType type)
+{
+    if (!check(type))
+        return false;
+    advance();
+    return true;
+}
+
 //////////////// code gen, back end (compiler) /////////////////
 
 static void emitByte(uint8_t byte)
@@ -177,6 +196,7 @@ static void endCompiler()
 #ifdef DEBUG_PRINT_CODE
     if (!parser.hadError)
     {
+        printf("\ndisassembling chunk\n");
         disassembleChunk(currentChunk(), "code");
     }
 #endif
@@ -187,10 +207,36 @@ static void endCompiler()
 // because the rules table needs a reference to the binary function.
 // So the rules table comes after and we use these forward declarations for access
 static void expression();
+static void statement();
+static void declaration();
 static ParseRule *getRule(TokenType type);
 static void parsePrecedence(Precedence precedence);
 
-static void binary()
+/*
+    Takes the given token and adds its lexeme to the chunks constant table as a string.
+    Returns the index of the constant in the constant table
+*/
+static uint8_t identifierConstant(Token *name)
+{
+    return makeConstant(OBJ_VAL(copyString(name->start, name->length)));
+}
+
+static uint8_t parseVariable(const char *errorMessage)
+{
+    consume(TOKEN_IDENTIFIER, errorMessage);
+    return identifierConstant(&parser.previous);
+}
+
+/*
+    Outputs the bytecode instruction that defines the new variable and stores its initial value
+    The index of the variables name in the constant table is the instructions operand
+*/
+static void defineVariable(uint8_t global)
+{
+    emitBytes(OP_DEFINE_GLOBAL, global);
+}
+
+static void binary(bool canAssign)
 {
     TokenType operatorType = parser.previous.type;
     ParseRule *rule = getRule(operatorType);
@@ -245,7 +291,7 @@ static void binary()
     }
 }
 
-static void literal()
+static void literal(bool canAssign)
 {
     switch (parser.previous.type)
     {
@@ -263,26 +309,56 @@ static void literal()
     }
 }
 
-static void grouping()
+static void grouping(bool canAssign)
 {
     // recursively call back into expression() to compile the expression between the parenthesis
     expression();
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression");
 }
 
-static void number()
+static void number(bool canAssign)
 {
     double value = strtod(parser.previous.start, NULL);
     emitConstant(NUMBER_VAL(value));
 }
 
-static void string()
+static void string(bool canAssign)
 {
     // + 1 and - 2 trim leading and trailing quotation marks
     emitConstant(OBJ_VAL(copyString(parser.previous.start + 1, parser.previous.length - 2)));
 }
 
-static void unary()
+/*
+    Emit bytecode for variables. Both reading variables and assignment
+*/
+static void namedVariable(Token name, bool canAssign)
+{
+    // take the given identifier and add its lexeme to the chunks constant table
+    uint8_t arg = identifierConstant(&name);
+
+    // right before compiling an expression that can also be used as an assignment target,
+    // we look for a subsequent = token
+
+    //  look for and consume the = only if its in the context of a low precedence expression
+    if (canAssign && match(TOKEN_EQUAL))
+    {
+        // of we see and =, we compile it as an assignment or setter
+        expression(); // compmile the assigned value
+        emitBytes(OP_SET_GLOBAL, arg);
+    }
+    else
+    {
+        // if no =, we compile as a variable access or getter
+        emitBytes(OP_GET_GLOBAL, arg);
+    }
+}
+
+static void variable(bool canAssign)
+{
+    namedVariable(parser.previous, canAssign);
+}
+
+static void unary(bool canAssign)
 {
     // the leading '-' token has been consumed and is sitting in previous
     TokenType operatorType = parser.previous.type;
@@ -329,7 +405,7 @@ ParseRule rules[] = {
     [TOKEN_GREATER_EQUAL] = {NULL, binary, PREC_COMPARISON},
     [TOKEN_LESS] = {NULL, binary, PREC_COMPARISON},
     [TOKEN_LESS_EQUAL] = {NULL, binary, PREC_COMPARISON},
-    [TOKEN_IDENTIFIER] = {NULL, NULL, PREC_NONE},
+    [TOKEN_IDENTIFIER] = {variable, NULL, PREC_NONE},
     [TOKEN_STRING] = {string, NULL, PREC_NONE},
     [TOKEN_NUMBER] = {number, NULL, PREC_NONE},
     [TOKEN_AND] = {NULL, NULL, PREC_NONE},
@@ -364,16 +440,26 @@ static void parsePrecedence(Precedence precedence)
         return;
     }
 
-    prefixRule();
+    //  allow variable() to take into account the precedence of the surrounding expression that contains the variable
+    bool canAssign = precedence <= PREC_ASSIGNMENT;
+    prefixRule(canAssign);
 
     while (precedence <= getRule(parser.current.type)->precedence)
     {
         advance();
         // parsed expression from previous recursive call (infix or prefix)
         // gets input to this gets input to this operator.
-        // It consumes whatever toke it needs (usually the right operand)
+        // It consumes whatever token it needs (usually the right operand)
         ParseFn infixRule = getRule(parser.previous.type)->infix;
-        infixRule();
+        infixRule(canAssign);
+    }
+
+    // if the assignment variable is nested inside some expression with a higher precedence
+    // and the = doesnt get consumed as part of the expression, nothing else is going to consume it
+    // its an error and needs reporting
+    if (canAssign && match(TOKEN_EQUAL))
+    {
+        error("Invalid assignment target.");
     }
 
     // if the next token is too low precedence, or isnt an infix operator at all, we are done.
@@ -384,10 +470,142 @@ static ParseRule *getRule(TokenType type)
     return &rules[type];
 }
 
+/*
+    uses a Pratt parser - top-down operator precedence parsing
+    When you add the stack effects of a series of instructions compiled from any complete expression, it will total one
+    Each expression leaves one result value on the stack
+*/
 static void expression()
 {
     // parse the lowest precidence level which subsumes all the higher-precidence expressions too
     parsePrecedence(PREC_ASSIGNMENT);
+}
+
+/*
+    Production for the declaration grammer
+*/
+static void varDeclaration()
+{
+    // variable name
+    uint8_t global = parseVariable("Expect variable name.");
+
+    // variable initialisation
+    if (match(TOKEN_EQUAL))
+    {
+        expression();
+    }
+    else
+    {
+        // compiler implicitly initializes to nil
+        emitByte(OP_NIL);
+    }
+    consume(TOKEN_SEMICOLON, "Expect ';' after variable declaration.");
+
+    // as usual in a stack based VM we emit this instruction last
+    defineVariable(global);
+}
+
+/*
+    An 'expression statement' is simply an expression followed by a statement
+    They're how you write an expression ina a context where a statement is expected.
+    Usually so you can call a function or evaluate an assignment for its side effect eg
+
+    brunch = "quiche";
+    each(brunch);
+
+    Semantically, an expression statement evaluayes hte expressiona nd discards the result.
+    The compiler directly encodes that behaviour. It compiles the expression then emits the OP_POP instruction
+
+    They are essential when we add functions
+*/
+static void expressionStatement()
+{
+    expression();
+    consume(TOKEN_SEMICOLON, "Expect ';' after expression.");
+    emitByte(OP_POP);
+}
+
+/*
+    Evaluates an expressiona nd prints it
+*/
+static void printStatement()
+{
+    expression();
+    // grammer expects a semi colon after so we consume it
+    consume(TOKEN_SEMICOLON, "Expect ';' after value.");
+    emitByte(OP_PRINT);
+}
+
+/*
+    Skip token indiscriminately until we reach somehting that looks like a statement boundary
+    We recognise a boundary by looking for a semi colon that ends a statement.
+    Or we look for a subsequent token that begins a statement like control flow for declaration keywords
+*/
+static void synchronize()
+{
+    parser.panicMode = false;
+
+    while (parser.current.type != TOKEN_EOF)
+    {
+        if (parser.previous.type == TOKEN_SEMICOLON)
+            return;
+        switch (parser.current.type)
+        {
+        case TOKEN_CLASS:
+        case TOKEN_FUN:
+        case TOKEN_VAR:
+        case TOKEN_FOR:
+        case TOKEN_IF:
+        case TOKEN_WHILE:
+        case TOKEN_PRINT:
+        case TOKEN_RETURN:
+            return;
+
+        default:; // Do nothing.
+        }
+
+        advance();
+    }
+}
+
+/*
+    Declaration type statements that bind a name to a variable
+    Declaration rule (parent) contains statement, so all statements are declarations
+
+    clox uses panic mode error recovery to minimise the number of cascaded compile errors it reports
+    The compiler exits panic mode when it reaches a synchronisation point. For clox we choose statement boundaries
+*/
+static void declaration()
+{
+    if (match(TOKEN_VAR))
+    {
+        varDeclaration();
+    }
+    else
+    {
+        statement();
+    }
+
+    if (parser.panicMode)
+        synchronize();
+}
+
+/*
+    Other type of statements, not declarations that bind a name to a variable
+    eg control flor, print etc
+    The bytecode for an entire statement has a total stack effect of zero.
+    Since a statement produces no values, it ultimately leaves the stack unchanged
+*/
+static void statement()
+{
+    if (match(TOKEN_PRINT))
+    {
+        printStatement();
+    }
+    else
+    {
+        expressionStatement();
+    }
 }
 
 /*
@@ -405,10 +623,16 @@ bool compile(const char *source, Chunk *chunk)
     parser.hadError = false;
     parser.panicMode = false;
 
-    advance();    /* primes the pump on the scanner */
-    expression(); /* uses a Pratt parser - top-down operator precedence parsing */
+    advance(); /* primes the pump on the scanner */
 
-    consume(TOKEN_EOF, "Expect end of expression.");
-    endCompiler();
+    // a program is a sequence of declarations
+    while (!match(TOKEN_EOF))
+    {
+        printf("\ncompiling declaration\n");
+        declaration();
+    }
+
+    printf("\ncompiler end reached\n");
+    endCompiler(); // emits an OP_RETURN
     return !parser.hadError;
 }

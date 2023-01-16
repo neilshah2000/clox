@@ -12,10 +12,15 @@ typedef struct
     Chunk *chunk; /* chunk is a sequence of bytecode */
     uint8_t *ip;  /* instruction pointer */
 
+    // run() function is not recursive
+    // nested expression tree is flattened into a linear series of instructions
+    // the stack is where we store these temporary values
+    // the stack array is declared directly inline in the VM struct, so we dont need to allocate it
     Value stack[STACK_MAX];
 
     /* points one past the top ie where the next value will go */
     Value *stackTop; /* direct pointer faster than index */
+    Table globals;   /* hash table of all global variables*/
     Table strings;   /* hash table of all strings. To support string interning */
     Obj *objects;    /* linked list of all the objects on the heap */
 } VM;
