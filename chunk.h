@@ -26,6 +26,9 @@ typedef enum
     OP_NOT,
     OP_NEGATE,
     OP_PRINT,
+    OP_JUMP,          // always jump
+    OP_JUMP_IF_FALSE, // jump on condition
+    OP_LOOP,          // always jump (but back not forwards)
     OP_RETURN,
 } OpCode;
 
