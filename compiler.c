@@ -61,10 +61,22 @@ typedef struct
 } Local;
 
 /*
+    top-level code vs function body
+*/
+typedef enum
+{
+    TYPE_FUNCTION,
+    TYPE_SCRIPT
+} FunctionType;
+
+/*
     Flar array of all locals in scope during each point of the compilation process
 */
 typedef struct
 {
+    ObjFunction *function; // all code including top-level is within a function body
+    FunctionType type;
+
     Local locals[UINT8_COUNT];
     int localCount; // how many locals are in scope
     int scopeDepth; // number of blocks surrounding the CURRENT bit of code we're compiling
@@ -74,11 +86,13 @@ typedef struct
 Parser parser;
 // global Compiler pointer but Compiler itself is stored on the stack in compiler() function
 Compiler *current = NULL;
-Chunk *compilingChunk;
 
+/*
+    The current chunk is always the chunk owned by the function we're in the middle of compiling
+*/
 static Chunk *currentChunk()
 {
-    return compilingChunk;
+    return &current->function->chunk;
 }
 
 //////////////// front end (parser) ////////////////////////
@@ -265,23 +279,40 @@ static void patchJump(int offset)
     currentChunk()->code[offset + 1] = jump & 0xff;
 }
 
-static void initCompiler(Compiler *compiler)
+static void initCompiler(Compiler *compiler, FunctionType type)
 {
+    compiler->function = NULL; // garbage collection related paranoia
+    compiler->type = type;
     compiler->localCount = 0;
     compiler->scopeDepth = 0;
+    compiler->function = newFunction();
     current = compiler;
+
+    // locals array keeps track of which stack slots are associated with which local variables or temporaries
+    // compiler implicitly claims stack slot 0 for the VMs own internal use
+    Local *local = &current->locals[current->localCount++];
+    local->depth = 0;
+    local->name.start = "";
+    local->name.length = 0;
 }
 
-static void endCompiler()
+/*
+    Return the function the chunk is compiled into
+*/
+static ObjFunction *endCompiler()
 {
     emitReturn();
+    ObjFunction *function = current->function;
+
 #ifdef DEBUG_PRINT_CODE
     if (!parser.hadError)
     {
         printf("\ndisassembling chunk\n");
-        disassembleChunk(currentChunk(), "code");
+        disassembleChunk(currentChunk(), function->name != NULL ? function->name->chars : "<script>"); // check top-level or not
     }
 #endif
+
+    return function;
 }
 
 /*
@@ -1004,13 +1035,14 @@ static void statement()
     Parser - generate an AST (consuming tokens, matching expected token types etc).
     Code Generator - produces target bytecode (and adding constants to the destination chunk).
     We do all this in one pass.
+
+    the compiler will create and return a function that contains the compiled top-level code
 */
-bool compile(const char *source, Chunk *chunk)
+ObjFunction *compile(const char *source)
 {
     initScanner(source);
     Compiler compiler; // compiler is stored on the stack in this compile() function
-    initCompiler(&compiler);
-    compilingChunk = chunk;
+    initCompiler(&compiler, TYPE_SCRIPT);
 
     parser.hadError = false;
     parser.panicMode = false;
@@ -1025,6 +1057,6 @@ bool compile(const char *source, Chunk *chunk)
     }
 
     printf("\ncompiler end reached\n");
-    endCompiler(); // emits an OP_RETURN
-    return !parser.hadError;
+    ObjFunction *function = endCompiler();    // emits an OP_RETURN
+    return parser.hadError ? NULL : function; // only return function if there are no errors, so VM doesn't try and execute invalid bytecode
 }
