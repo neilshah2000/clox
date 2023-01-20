@@ -70,16 +70,20 @@ typedef enum
 } FunctionType;
 
 /*
-    Flar array of all locals in scope during each point of the compilation process
+    Flat array of all locals in scope during each point of the compilation process
+    Create a compiler for each function being compiled
+    treat a series of nested Compiler structs as a stack
+    But we dont use an array, we use a linked list
 */
-typedef struct
+typedef struct Compiler
 {
-    ObjFunction *function; // all code including top-level is within a function body
+    struct Compiler *enclosing; // each Compiler points back to the function the encloses it (all the way back to root Compiler for top-level code)
+    ObjFunction *function;      // all code including top-level is within a function body
     FunctionType type;
 
-    Local locals[UINT8_COUNT];
-    int localCount; // how many locals are in scope
-    int scopeDepth; // number of blocks surrounding the CURRENT bit of code we're compiling
+    Local locals[UINT8_COUNT]; // local variables
+    int localCount;            // how many locals are in scope
+    int scopeDepth;            // number of blocks surrounding the CURRENT bit of code we're compiling
 } Compiler;
 
 // single global parser variable so dont have to pass around different functions
@@ -281,12 +285,21 @@ static void patchJump(int offset)
 
 static void initCompiler(Compiler *compiler, FunctionType type)
 {
+    // capture the about-to-no-longer-be-current one in that pointer (set up nested compiler linked list/stack)
+    compiler->enclosing = current;
+
     compiler->function = NULL; // garbage collection related paranoia
     compiler->type = type;
     compiler->localCount = 0;
     compiler->scopeDepth = 0;
     compiler->function = newFunction();
     current = compiler;
+    if (type != TYPE_SCRIPT)
+    {
+        // function object created in the compiler outlives the compiler and persists until runtime
+        // so we can't reference the string from the source code, we have to copy it
+        current->function->name = copyString(parser.previous.start, parser.previous.length);
+    }
 
     // locals array keeps track of which stack slots are associated with which local variables or temporaries
     // compiler implicitly claims stack slot 0 for the VMs own internal use
@@ -312,6 +325,8 @@ static ObjFunction *endCompiler()
     }
 #endif
 
+    // when the compiler finishes, it pops off the stack by restoring the previous compiler to be the new current one
+    current = current->enclosing;
     return function;
 }
 
@@ -446,8 +461,15 @@ static uint8_t parseVariable(const char *errorMessage)
     return identifierConstant(&parser.previous);
 }
 
+/*
+    For variables (local scope) and functions (top-level and local scope)
+*/
 static void markInitialized()
 {
+    // top-level functions have no local variable to mark initialized
+    if (current->scopeDepth == 0)
+        return;
+
     current->locals[current->localCount - 1].depth = current->scopeDepth;
 }
 
@@ -467,6 +489,28 @@ static void defineVariable(uint8_t global)
     }
 
     emitBytes(OP_DEFINE_GLOBAL, global);
+}
+
+/*
+    Each argument expression generates code that leaves its value on the stack in preparation for the call
+*/
+static uint8_t argumentList()
+{
+    uint8_t argCount = 0;
+    if (!check(TOKEN_RIGHT_PAREN))
+    {
+        do
+        {
+            expression();
+            if (argCount == 255)
+            {
+                error("Can't have more than 255 arguments");
+            }
+            argCount++;
+        } while (match(TOKEN_COMMA));
+    }
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after arguments.");
+    return argCount;
 }
 
 /*
@@ -538,6 +582,15 @@ static void binary(bool canAssign)
     default:
         return; // Unreachable.
     }
+}
+
+/*
+    Dispatched when the parser encounters a left paranthesis followed by an expression
+*/
+static void call(bool canAssign)
+{
+    uint8_t argCount = argumentList();
+    emitBytes(OP_CALL, argCount);
 }
 
 static void literal(bool canAssign)
@@ -666,7 +719,7 @@ static void unary(bool canAssign)
 
 */
 ParseRule rules[] = {
-    [TOKEN_LEFT_PAREN] = {grouping, NULL, PREC_NONE},
+    [TOKEN_LEFT_PAREN] = {grouping, call, PREC_CALL},
     [TOKEN_RIGHT_PAREN] = {NULL, NULL, PREC_NONE},
     [TOKEN_LEFT_BRACE] = {NULL, NULL, PREC_NONE},
     [TOKEN_RIGHT_BRACE] = {NULL, NULL, PREC_NONE},
@@ -770,6 +823,52 @@ static void block()
     }
 
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
+}
+
+/*
+    Compile function parameters and body
+*/
+static void function(FunctionType type)
+{
+    Compiler compiler;
+    initCompiler(&compiler, type);
+    beginScope();
+
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after function name.");
+
+    // function parameters
+    if (!check(TOKEN_RIGHT_PAREN))
+    {
+        do
+        {
+            current->function->arity++;
+            if (current->function->arity > 255)
+            {
+                errorAtCurrent("Can't have more than 255 parameters.");
+            }
+            uint8_t constant = parseVariable("Expect parameter name.");
+            defineVariable(constant);
+        } while (match(TOKEN_COMMA));
+    }
+
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after parameters.");
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before function body.");
+    block();
+
+    ObjFunction *function = endCompiler(); // end compiler so we dont need to bother with endScope
+    emitBytes(OP_CONSTANT, makeConstant(OBJ_VAL(function)));
+}
+
+/*
+    Functions are first class values
+    Store function in a newly declared variable
+*/
+static void funDeclaration()
+{
+    uint8_t global = parseVariable("Expect function name.");
+    markInitialized();       // to ensure name can be referenced in the body without generating an error
+    function(TYPE_FUNCTION); // compile the function parameter list and body
+    defineVariable(global);  // store the function back into the variable we defined for it
 }
 
 /*
@@ -979,7 +1078,11 @@ static void synchronize()
 */
 static void declaration()
 {
-    if (match(TOKEN_VAR))
+    if (match(TOKEN_FUN))
+    {
+        funDeclaration();
+    }
+    else if (match(TOKEN_VAR))
     {
         varDeclaration();
     }

@@ -29,6 +29,7 @@ typedef enum
     OP_JUMP,          // always jump
     OP_JUMP_IF_FALSE, // jump on condition
     OP_LOOP,          // always jump (but back not forwards)
+    OP_CALL,          // function calls
     OP_RETURN,
 } OpCode;
 

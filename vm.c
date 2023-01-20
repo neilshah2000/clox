@@ -27,12 +27,30 @@ static void runtimeError(const char *format, ...)
     va_end(args);
     fputs("\n", stderr);
 
-    // pulls chunk and ip from the topmost CallFrame on the stack
-    CallFrame *frame = &vm.frames[vm.frameCount - 1];
-    size_t instruction = frame->ip - frame->function->chunk.code - 1;
-    int line = frame->function->chunk.lines[instruction];
+    // // pulls chunk and ip from the topmost CallFrame on the stack
+    // CallFrame *frame = &vm.frames[vm.frameCount - 1];
+    // size_t instruction = frame->ip - frame->function->chunk.code - 1;
+    // int line = frame->function->chunk.lines[instruction];
+    // fprintf(stderr, "[line %d] in script\n", line);
 
-    fprintf(stderr, "[line %d] in script\n", line);
+    // walk the call stack from most top of call stack (most recent call) to the bottom (top-level code)
+    // for each frame, print the line number corresponding to the ip, and the function name
+    for (int i = vm.frameCount - 1; i >= 0; i--)
+    {
+        CallFrame *frame = &vm.frames[i];
+        ObjFunction *function = frame->function;
+        size_t instruction = frame->ip - function->chunk.code - 1; // -1 because the ip has already been incremented, so decrement to the failed instruction
+        fprintf(stderr, "[line %d] in ", function->chunk.lines[instruction]);
+        if (function->name == NULL)
+        {
+            fprintf(stderr, "script\n");
+        }
+        else
+        {
+            fprintf(stderr, "%s()\n", function->name->chars);
+        }
+    }
+
     resetStack();
 }
 
@@ -72,6 +90,59 @@ static Value peek(int distance)
     return vm.stackTop[-1 - distance];
 }
 
+/*
+    Initializes the next call frame on the stack
+*/
+static bool call(ObjFunction *function, int argCount)
+{
+    // check argument count
+    if (argCount != function->arity)
+    {
+        runtimeError("Expected %d arguments but got %d", function->arity, argCount);
+        return false;
+    }
+
+    // check call stack size
+    if (vm.frameCount == FRAMES_MAX)
+    {
+        runtimeError("Stack overflow.");
+        return false;
+    }
+
+    CallFrame *frame = &vm.frames[vm.frameCount++];
+    // stores a pointer to the function being called
+    frame->function = function;
+    // points the frames ip to the beginning of the functions bytecode
+    frame->ip = function->chunk.code;
+    // sets the slots pointer to give the frame its window into the stack
+    // the arithmatic ensures the arguments already on the stack lign up with the functions parameters
+    frame->slots = vm.stackTop - argCount - 1; // -1 is to account for stack slot zero which the compiler set asside for methods
+    return true;
+}
+
+/*
+    Only allow calls to functions and other callable values
+*/
+static bool callValue(Value callee, int argCount)
+{
+    if (IS_OBJ(callee))
+    {
+        switch (OBJ_TYPE(callee))
+        {
+        case OBJ_FUNCTION:
+        {
+            return call(AS_FUNCTION(callee), argCount);
+        }
+        default:
+        {
+            break; // Non-callable object type
+        }
+        }
+    }
+    runtimeError("Can only call functions and classes");
+    return false;
+}
+
 static bool isFalsey(Value value)
 {
     return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value));
@@ -99,7 +170,10 @@ static void concatenate()
 */
 static InterpretResult run()
 {
-    CallFrame *frame = &vm.frames[vm.frameCount - 1]; // store as local var to encourage c compiler to keep the pointer in a register
+    // cached pointer to current frame
+    // store as local var to encourage c compiler to keep the pointer in a register
+    CallFrame *frame = &vm.frames[vm.frameCount - 1];
+
 #define READ_BYTE() (*frame->ip++)
 #define READ_CONSTANT() (frame->function->chunk.constants.values[READ_BYTE()])
 // grabs the next 2 bytes from the chunk and builds a 16-bit unsigned integer from them
@@ -322,6 +396,18 @@ static InterpretResult run()
             frame->ip -= offset;
             break;
         }
+        case OP_CALL:
+        {
+            int argCount = READ_BYTE(); // number of arguments passed to the function is stored in teh instructions operand
+            if (!callValue(peek(argCount), argCount))
+            {
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            // else, is successful so there will be a new frame on the CallFrame stack for the called function
+            // so update our local cached variable
+            frame = &vm.frames[vm.frameCount - 1];
+            break;
+        }
         case OP_RETURN:
         {
             // printValue(pop());
@@ -345,11 +431,8 @@ InterpretResult interpret(const char *source)
     if (function == NULL)
         return INTERPRET_COMPILE_ERROR;
 
-    push(OBJ_VAL(function));                        // store the function on the stack
-    CallFrame *frame = &vm.frames[vm.frameCount++]; // prepare an initial CallFrame to execute its code
-    frame->function = function;
-    frame->ip = function->chunk.code;
-    frame->slots = vm.stack;
+    push(OBJ_VAL(function)); // store the function on the stack
+    call(function, 0);       // set up first frame for executing top level code
 
     printf("\nstart the VM and run the bytecode chunk\n");
     return run();
