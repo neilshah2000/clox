@@ -243,6 +243,7 @@ static int emitJump(uint8_t instruction)
 
 static void emitReturn()
 {
+    emitByte(OP_NIL);
     emitByte(OP_RETURN);
 }
 
@@ -1016,6 +1017,27 @@ static void printStatement()
     emitByte(OP_PRINT);
 }
 
+static void returnStatement()
+{
+    if (current->type == TYPE_SCRIPT)
+    {
+        error("Can't return from top-level code.");
+    }
+
+    if (match(TOKEN_SEMICOLON))
+    {
+        // return OP_NIL if no return value
+        emitReturn();
+    }
+    else
+    {
+        // otherwise compile the return value expression
+        expression();
+        consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
+        emitByte(OP_RETURN);
+    }
+}
+
 /*
 
 */
@@ -1114,6 +1136,10 @@ static void statement()
     else if (match(TOKEN_IF))
     {
         ifStatement();
+    }
+    else if (match(TOKEN_RETURN))
+    {
+        returnStatement();
     }
     else if (match(TOKEN_WHILE))
     {

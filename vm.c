@@ -410,10 +410,26 @@ static InterpretResult run()
         }
         case OP_RETURN:
         {
-            // printValue(pop());
-            printf("\n\nExit Interpreter\n");
-            // Exit interpreter.
-            return INTERPRET_OK;
+            // when a function returns a value, that value will be on top of the stack.
+            // We're about to disgard the called functions entire stack window so we pop that return value off and hang onto it
+            Value result = pop();
+            // disgard the CallFrame for the returning function
+            vm.frameCount--;
+            // if last CallFrame we have finished executing top-level code
+            // program has finished so exit interpreter
+            if (vm.frameCount == 0)
+            {
+                pop();
+                return INTERPRET_OK;
+            }
+
+            // otherwise disgard slots callee was using for parameters and local variables
+            // this means the top of the stack ends up right at the beginning of the returning functions stack window
+            vm.stackTop = frame->slots;
+            // push the return value onto the stack at the new lower location
+            push(result);
+            // update run() functions cached pointer to the current frame
+            frame = &vm.frames[vm.frameCount - 1];
         }
         }
     }

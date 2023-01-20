@@ -1,0 +1,8 @@
+fun a() { b(); }
+fun b() { c(); }
+fun c() {
+    print("we are in c");
+}
+
+a();
+return;
