@@ -1,6 +1,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "common.h"
 #include "compiler.h"
@@ -11,6 +12,11 @@
 
 // single top level VM so we dont have to pass around to all the functions
 VM vm;
+
+static Value clockNative(int argCount, Value *args)
+{
+    return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+}
 
 static void resetStack()
 {
@@ -26,12 +32,6 @@ static void runtimeError(const char *format, ...)
     vfprintf(stderr, format, args);
     va_end(args);
     fputs("\n", stderr);
-
-    // // pulls chunk and ip from the topmost CallFrame on the stack
-    // CallFrame *frame = &vm.frames[vm.frameCount - 1];
-    // size_t instruction = frame->ip - frame->function->chunk.code - 1;
-    // int line = frame->function->chunk.lines[instruction];
-    // fprintf(stderr, "[line %d] in script\n", line);
 
     // walk the call stack from most top of call stack (most recent call) to the bottom (top-level code)
     // for each frame, print the line number corresponding to the ip, and the function name
@@ -54,12 +54,29 @@ static void runtimeError(const char *format, ...)
     resetStack();
 }
 
+/*
+    Takes a pointer to a C function and a name it will be known as in Lox
+    Wrap the function in an ObjNative and store it in a global variable with the given name
+*/
+static void defineNative(const char *name, NativeFn function)
+{
+    // copyString() and newNative() allocate memory
+    // so the GC doesnt collect them, we push and pop them off the stack so the GC knows we are using them
+    push(OBJ_VAL(copyString(name, (int)strlen(name))));
+    push(OBJ_VAL(newNative(function)));
+    tableSet(&vm.globals, AS_STRING(vm.stack[0]), vm.stack[1]);
+    pop();
+    pop();
+}
+
 void initVM()
 {
     resetStack();
     vm.objects = NULL;
     initTable(&vm.globals);
     initTable(&vm.strings);
+
+    defineNative("clock", clockNative);
 }
 
 void freeVM()
@@ -132,6 +149,17 @@ static bool callValue(Value callee, int argCount)
         case OBJ_FUNCTION:
         {
             return call(AS_FUNCTION(callee), argCount);
+        }
+        case OBJ_NATIVE:
+        {
+            // get the C function from the bytecode chunk
+            NativeFn native = AS_NATIVE(callee);
+            // call the native C function here (no need for CallFrames or anything)
+            Value result = native(argCount, vm.stackTop - argCount);
+            vm.stackTop -= argCount + 1;
+            // put result back on stack
+            push(result);
+            return true;
         }
         default:
         {
