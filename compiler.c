@@ -857,7 +857,7 @@ static void function(FunctionType type)
     block();
 
     ObjFunction *function = endCompiler(); // end compiler so we dont need to bother with endScope
-    emitBytes(OP_CONSTANT, makeConstant(OBJ_VAL(function)));
+    emitBytes(OP_CLOSURE, makeConstant(OBJ_VAL(function)));
 }
 
 /*

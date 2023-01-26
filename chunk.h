@@ -30,6 +30,7 @@ typedef enum
     OP_JUMP_IF_FALSE, // jump on condition
     OP_LOOP,          // always jump (but back not forwards)
     OP_CALL,          // function calls
+    OP_CLOSURE,       // takes a single operand that represents a constant table index for the function. Actually unusual because does more than that
     OP_RETURN,
 } OpCode;
 

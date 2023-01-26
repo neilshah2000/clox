@@ -38,7 +38,7 @@ static void runtimeError(const char *format, ...)
     for (int i = vm.frameCount - 1; i >= 0; i--)
     {
         CallFrame *frame = &vm.frames[i];
-        ObjFunction *function = frame->function;
+        ObjFunction *function = frame->closure->function;
         size_t instruction = frame->ip - function->chunk.code - 1; // -1 because the ip has already been incremented, so decrement to the failed instruction
         fprintf(stderr, "[line %d] in ", function->chunk.lines[instruction]);
         if (function->name == NULL)
@@ -110,12 +110,12 @@ static Value peek(int distance)
 /*
     Initializes the next call frame on the stack
 */
-static bool call(ObjFunction *function, int argCount)
+static bool call(ObjClosure *closure, int argCount)
 {
     // check argument count
-    if (argCount != function->arity)
+    if (argCount != closure->function->arity)
     {
-        runtimeError("Expected %d arguments but got %d", function->arity, argCount);
+        runtimeError("Expected %d arguments but got %d", closure->function->arity, argCount);
         return false;
     }
 
@@ -128,9 +128,9 @@ static bool call(ObjFunction *function, int argCount)
 
     CallFrame *frame = &vm.frames[vm.frameCount++];
     // stores a pointer to the function being called
-    frame->function = function;
+    frame->closure = closure;
     // points the frames ip to the beginning of the functions bytecode
-    frame->ip = function->chunk.code;
+    frame->ip = closure->function->chunk.code;
     // sets the slots pointer to give the frame its window into the stack
     // the arithmatic ensures the arguments already on the stack lign up with the functions parameters
     frame->slots = vm.stackTop - argCount - 1; // -1 is to account for stack slot zero which the compiler set asside for methods
@@ -146,9 +146,9 @@ static bool callValue(Value callee, int argCount)
     {
         switch (OBJ_TYPE(callee))
         {
-        case OBJ_FUNCTION:
+        case OBJ_CLOSURE:
         {
-            return call(AS_FUNCTION(callee), argCount);
+            return call(AS_CLOSURE(callee), argCount);
         }
         case OBJ_NATIVE:
         {
@@ -203,7 +203,7 @@ static InterpretResult run()
     CallFrame *frame = &vm.frames[vm.frameCount - 1];
 
 #define READ_BYTE() (*frame->ip++)
-#define READ_CONSTANT() (frame->function->chunk.constants.values[READ_BYTE()])
+#define READ_CONSTANT() (frame->closure->function->chunk.constants.values[READ_BYTE()])
 // grabs the next 2 bytes from the chunk and builds a 16-bit unsigned integer from them
 #define READ_SHORT() (frame->ip += 2, (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
 // reads a one byte operand from the bytecode chunk. Treats as an index into the chunks constants table and reads the string at that index
@@ -240,7 +240,7 @@ static InterpretResult run()
         }
         printf("\n");
         /* with pointer math to convert ip back to a relative offset from beginning of bytecode */
-        disassembleInstruction(&frame->function->chunk, (int)(frame->ip - frame->function->chunk.code));
+        disassembleInstruction(&frame->closure->function->chunk, (int)(frame->ip - frame->closure->function->chunk.code));
 #endif
 
         uint8_t instruction;
@@ -436,6 +436,13 @@ static InterpretResult run()
             frame = &vm.frames[vm.frameCount - 1];
             break;
         }
+        case OP_CLOSURE:
+        {
+            ObjFunction *function = AS_FUNCTION(READ_CONSTANT());
+            ObjClosure *closure = newClosure(function); // wrap all functions in a closure and push it onto the stack
+            push(OBJ_VAL(closure));
+            break;
+        }
         case OP_RETURN:
         {
             // when a function returns a value, that value will be on top of the stack.
@@ -474,9 +481,13 @@ InterpretResult interpret(const char *source)
     ObjFunction *function = compile(source); // pass source code to compiler
     if (function == NULL)
         return INTERPRET_COMPILE_ERROR;
-
+    printf("\nconverting the function to closure\n");
     push(OBJ_VAL(function)); // store the function on the stack
-    call(function, 0);       // set up first frame for executing top level code
+    // set up first frame for executing top level code
+    ObjClosure *closure = newClosure(function);
+    pop();
+    push(OBJ_VAL(closure));
+    call(closure, 0);
 
     printf("\nstart the VM and run the bytecode chunk\n");
     return run();

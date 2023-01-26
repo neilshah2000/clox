@@ -14,7 +14,7 @@
 */
 typedef struct
 {
-    ObjFunction *function; // used to looks up constants and other stuff
+    ObjClosure *closure; // used to looks up constants and other stuff
     // caller stores its own instruction pointer.
     // When we return from a funciton, the VM will jump to the ip of the callers CallFrame and resume from there
     uint8_t *ip;
