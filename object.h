@@ -39,8 +39,9 @@ struct Obj
 */
 typedef struct
 {
-    Obj obj;   // first class functions so same Obj header all object types in Lox share
-    int arity; // number of parameters
+    Obj obj;          // first class functions so same Obj header all object types in Lox share
+    int arity;        // number of parameters
+    int upvalueCount; // count of closed over variables
     Chunk chunk;
     ObjString *name;
 } ObjFunction;

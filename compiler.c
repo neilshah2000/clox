@@ -61,6 +61,15 @@ typedef struct
 } Local;
 
 /*
+    references closed over variables in outer scopes
+*/
+typedef struct
+{
+    uint8_t index; // stores which local slot the upvalue is capturing
+    bool isLocal;  // does it capture a local variable or an upvalue from the surrounding function
+} Upvalue;
+
+/*
     top-level code vs function body
 */
 typedef enum
@@ -81,9 +90,10 @@ typedef struct Compiler
     ObjFunction *function;      // all code including top-level is within a function body
     FunctionType type;
 
-    Local locals[UINT8_COUNT]; // local variables
-    int localCount;            // how many locals are in scope
-    int scopeDepth;            // number of blocks surrounding the CURRENT bit of code we're compiling
+    Local locals[UINT8_COUNT];     // local variables
+    int localCount;                // how many locals are in scope
+    Upvalue upvalues[UINT8_COUNT]; // references closed over variables in surrounding scopes
+    int scopeDepth;                // number of blocks surrounding the CURRENT bit of code we're compiling
 } Compiler;
 
 // single global parser variable so dont have to pass around different functions
@@ -402,6 +412,61 @@ static int resolveLocal(Compiler *compiler, Token *name)
     return -1;
 }
 
+static int addUpvalue(Compiler *compiler, uint8_t index, bool isLocal)
+{
+    int upvalueCount = compiler->function->upvalueCount;
+
+    // check if there is already an upvalue that closes over this variable
+    for (int i = 0; i < upvalueCount; i++)
+    {
+        Upvalue *upvalue = &compiler->upvalues[i];
+        if (upvalue->index == index && upvalue->isLocal == isLocal)
+        {
+            return i;
+        }
+    }
+
+    if (upvalueCount == UINT8_COUNT)
+    {
+        error("Too many colsure variables in function.");
+        return 0;
+    }
+
+    compiler->upvalues[upvalueCount].isLocal = isLocal;
+    compiler->upvalues[upvalueCount].index = index;
+    return compiler->function->upvalueCount++;
+}
+
+/*
+    resolve a local variable with the surrounding scopes
+    check if it declared there and is closed over
+*/
+static int resolveUpvalue(Compiler *compiler, Token *name)
+{
+    // reached top level so not closed over variables
+    if (compiler->enclosing == NULL)
+        return -1;
+
+    // check in enclosing scope for variable declaration
+    // if found, create an upvalue
+    // (base case of recursive call)
+    int local = resolveLocal(compiler->enclosing, name);
+    if (local != -1)
+    {
+        return addUpvalue(compiler, (uint8_t)local, true);
+    }
+
+    // otherwise look for local variable beyond immediately enclosing function
+    // by calling resolveUpvalue on ENCLOSING function
+    int upvalue = resolveUpvalue(compiler->enclosing, name); // recursive call
+    if (upvalue != -1)
+    {
+        return addUpvalue(compiler, (uint8_t)upvalue, false);
+    }
+
+    return -1;
+}
+
 /*
     compiler needs to remember that a local exists
     so we add to the compilers list of variables in the current scope
@@ -662,6 +727,12 @@ static void namedVariable(Token name, bool canAssign)
         getOp = OP_GET_LOCAL;
         setOp = OP_SET_LOCAL;
     }
+    else if ((arg = resolveUpvalue(current, &name)) != -1)
+    {
+        // try looking in the surrounding scopes for closed over variables
+        getOp = OP_GET_UPVALUE;
+        setOp = OP_SET_UPVALUE;
+    }
     else
     {
         // if we cant find a local, use global variabley bytecode
@@ -858,6 +929,15 @@ static void function(FunctionType type)
 
     ObjFunction *function = endCompiler(); // end compiler so we dont need to bother with endScope
     emitBytes(OP_CLOSURE, makeConstant(OBJ_VAL(function)));
+
+    // OP_CLOSURE ins unique in that it has variable sized encoding
+    // for each upvalue the closure captures there are 2 single byte operands
+    // 1st byte is local or enclosing function, 2nd byte is local slot or upvalue index to capture
+    for (int i = 0; i < function->upvalueCount; i++)
+    {
+        emitByte(compiler.upvalues[i].isLocal ? 1 : 0);
+        emitByte(compiler.upvalues[i].index);
+    }
 }
 
 /*
