@@ -23,6 +23,10 @@ static void freeObject(Obj *object)
     {
     case OBJ_CLOSURE:
     {
+        // free upvalue array
+        ObjClosure *closure = (ObjClosure *)object;
+        FREE_ARRAY(ObjUpvalue *, closure->upvalues, closure->upvalueCount);
+
         // free only the ObjClosure itself, not the ObjFunction. Because the closure doesnt own the function.
         // other closures may reference it
         FREE(ObjClosure, object);
@@ -45,6 +49,12 @@ static void freeObject(Obj *object)
         ObjString *string = (ObjString *)object;
         FREE_ARRAY(char, string->chars, string->length + 1);
         FREE(ObjString, object);
+        break;
+    }
+    case OBJ_UPVALUE:
+    {
+        // free only the upvalue object wrapper, not the object itself, so other upvalues can keep the reference
+        FREE(ObjUpvalue, object);
         break;
     }
     }

@@ -56,8 +56,9 @@ typedef struct
 */
 typedef struct
 {
-    Token name; // variable name to compare against lexeme when we are resolving identifiers
-    int depth;  // level of nesting where they appear. Zero is global, one first top-level block...
+    Token name;      // variable name to compare against lexeme when we are resolving identifiers
+    int depth;       // level of nesting where they appear. Zero is global, one first top-level block...
+    bool isCaptured; // true if the local is captured by any leter function declaration
 } Local;
 
 /*
@@ -316,6 +317,7 @@ static void initCompiler(Compiler *compiler, FunctionType type)
     // compiler implicitly claims stack slot 0 for the VMs own internal use
     Local *local = &current->locals[current->localCount++];
     local->depth = 0;
+    local->isCaptured = false;
     local->name.start = "";
     local->name.length = 0;
 }
@@ -356,8 +358,16 @@ static void endScope()
     // clean up all local variables
     while (current->localCount > 0 && current->locals[current->localCount - 1].depth > current->scopeDepth)
     {
-        // clean locals off stack by poping each one
-        emitByte(OP_POP);
+        if (current->locals[current->localCount - 1].isCaptured)
+        {
+            // compiler emits code to free the stack slots for the locals, we can tell which ones need to be hoisted onto the heap
+            emitByte(OP_CLOSE_UPVALUE);
+        }
+        else
+        {
+            // clean locals off stack by poping each one
+            emitByte(OP_POP);
+        }
         current->localCount--;
     }
 }
@@ -453,6 +463,7 @@ static int resolveUpvalue(Compiler *compiler, Token *name)
     int local = resolveLocal(compiler->enclosing, name);
     if (local != -1)
     {
+        compiler->enclosing->locals[local].isCaptured = true;
         return addUpvalue(compiler, (uint8_t)local, true);
     }
 
@@ -483,6 +494,7 @@ static void addLocal(Token name)
     Local *local = &current->locals[current->localCount++];
     local->name = name;
     local->depth = -1;
+    local->isCaptured = false;
 }
 
 /*

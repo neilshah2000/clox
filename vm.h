@@ -35,10 +35,11 @@ typedef struct
     Value stack[STACK_MAX];
 
     /* points one past the top ie where the next value will go */
-    Value *stackTop; /* direct pointer faster than index */
-    Table globals;   /* hash table of all global variables*/
-    Table strings;   /* hash table of all strings. To support string interning */
-    Obj *objects;    /* linked list of all the objects on the heap */
+    Value *stackTop;          /* direct pointer faster than index */
+    Table globals;            /* hash table of all global variables*/
+    Table strings;            /* hash table of all strings. To support string interning */
+    ObjUpvalue *openUpvalues; /* open upvalues reference local variables further down the stack */
+    Obj *objects;             /* linked list of all the objects on the heap */
 } VM;
 
 typedef enum

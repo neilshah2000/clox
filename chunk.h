@@ -33,6 +33,7 @@ typedef enum
     OP_LOOP,          // always jump (but back not forwards)
     OP_CALL,          // function calls
     OP_CLOSURE,       // takes a single operand that represents a constant table index for the function. Actually unusual because does more than that
+    OP_CLOSE_UPVALUE, // when a stack variable moves to heap because of closures
     OP_RETURN,
 } OpCode;
 

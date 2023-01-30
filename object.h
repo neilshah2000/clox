@@ -24,6 +24,7 @@ typedef enum
     OBJ_FUNCTION,
     OBJ_NATIVE,
     OBJ_STRING,
+    OBJ_UPVALUE,
 } ObjType;
 
 // struct that contains the state shared across all object types.
@@ -69,13 +70,27 @@ struct ObjString
 };
 
 /*
-    Wrapper around ObjFunction
+    upvalues manages closed-over variables that no longer live in the stack
+    this is the runtime representation of upvalues
+*/
+typedef struct ObjUpvalue
+{
+    Obj obj; // base class for objects
+    Value *location; // pointer to closed over variable. allows variable in outer function to be assigned to 
+    Value closed;
+    struct ObjUpvalue *next; // make upvalues a linked list
+} ObjUpvalue;
+
+/*
+    Wrapper around ObjFunction. This the compile time representation of closures
     Also contains the runtime state for the variables the function closes over
 */
 typedef struct
 {
     Obj obj;
     ObjFunction *function;
+    ObjUpvalue **upvalues; // pointer to a dynamically allocated array of pointers to upvalues
+    int upvalueCount;
 } ObjClosure;
 
 ObjClosure *newClosure(ObjFunction *function);
@@ -83,6 +98,7 @@ ObjFunction *newFunction();
 ObjNative *newNative(NativeFn function);
 ObjString *takeString(char *chars, int length);
 ObjString *copyString(const char *chars, int length);
+ObjUpvalue *newUpvalue(Value *slot);
 void printObject(Value value);
 
 static inline bool isObjType(Value value, ObjType type)

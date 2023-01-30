@@ -22,6 +22,7 @@ static void resetStack()
 {
     vm.stackTop = vm.stack;
     vm.frameCount = 0;
+    vm.openUpvalues = NULL;
 }
 
 // variadic function
@@ -169,6 +170,54 @@ static bool callValue(Value callee, int argCount)
     }
     runtimeError("Can only call functions and classes");
     return false;
+}
+
+static ObjUpvalue *captureUpvalue(Value *local)
+{
+    // reuse a previous upvalue if it points to the same local variable
+    // look for it here
+    ObjUpvalue *prevUpvalue = NULL;
+    ObjUpvalue *upvalue = vm.openUpvalues;
+    while (upvalue != NULL && upvalue->location > local)
+    {
+        prevUpvalue = upvalue;
+        upvalue = upvalue->next;
+    }
+
+    // reuse if found
+    if (upvalue != NULL && upvalue->location == local)
+    {
+        return upvalue;
+    }
+
+    // else
+    ObjUpvalue *createdUpvalue = newUpvalue(local);
+    createdUpvalue->next = upvalue;
+
+    if (prevUpvalue == NULL)
+    {
+        vm.openUpvalues = createdUpvalue;
+    }
+    else
+    {
+        prevUpvalue->next = createdUpvalue;
+    }
+
+    return createdUpvalue;
+}
+
+/*
+    closes every open upvalue it can find that points to that slot or any above it on the stack
+*/
+static void closeUpvalues(Value *last)
+{
+    while (vm.openUpvalues != NULL && vm.openUpvalues->location >= last)
+    {
+        ObjUpvalue *upvalue = vm.openUpvalues;
+        upvalue->closed = *upvalue->location;
+        upvalue->location = &upvalue->closed;
+        vm.openUpvalues = upvalue->next;
+    }
 }
 
 static bool isFalsey(Value value)
@@ -327,6 +376,19 @@ static InterpretResult run()
             // the assignment is nested in some larger expression
             break;
         }
+        case OP_GET_UPVALUE:
+        {
+            // index into the current function's upvalue array
+            uint8_t slot = READ_BYTE();
+            push(*frame->closure->upvalues[slot]->location);
+            break;
+        }
+        case OP_SET_UPVALUE:
+        {
+            uint8_t slot = READ_BYTE();
+            *frame->closure->upvalues[slot]->location = peek(0);
+            break;
+        }
         case OP_EQUAL:
         {
             Value b = pop();
@@ -441,6 +503,30 @@ static InterpretResult run()
             ObjFunction *function = AS_FUNCTION(READ_CONSTANT());
             ObjClosure *closure = newClosure(function); // wrap all functions in a closure and push it onto the stack
             push(OBJ_VAL(closure));
+
+            // walk through all the operands after OP_CLOSURE to see what kind of upvalue each slot captures
+            for (int i = 0; i < closure->upvalueCount; i++)
+            {
+                uint8_t isLocal = READ_BYTE();
+                uint8_t index = READ_BYTE();
+                if (isLocal)
+                {
+                    // closes over a local variable in ENCLOSING function, so create the upvalue
+                    closure->upvalues[i] = captureUpvalue(frame->slots + index);
+                }
+                else
+                {
+                    // capture an upvalue from the SURROUNDING function
+                    closure->upvalues[i] = frame->closure->upvalues[index];
+                }
+            }
+
+            break;
+        }
+        case OP_CLOSE_UPVALUE:
+        {
+            closeUpvalues(vm.stackTop - 1);
+            pop();
             break;
         }
         case OP_RETURN:
@@ -448,6 +534,7 @@ static InterpretResult run()
             // when a function returns a value, that value will be on top of the stack.
             // We're about to disgard the called functions entire stack window so we pop that return value off and hang onto it
             Value result = pop();
+            closeUpvalues(frame->slots);
             // disgard the CallFrame for the returning function
             vm.frameCount--;
             // if last CallFrame we have finished executing top-level code
