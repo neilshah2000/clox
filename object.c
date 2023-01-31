@@ -15,9 +15,14 @@ static Obj *allocateObject(size_t size, ObjType type)
 {
     Obj *object = (Obj *)reallocate(NULL, 0, size);
     object->type = type;
+    object->isMarked = false;
 
     object->next = vm.objects;
     vm.objects = object;
+
+#ifdef DEBUG_LOG_GC
+    printf("%p allocate %zu for %d\n", (void *)object, size, type);
+#endif
     return object;
 }
 
@@ -74,7 +79,9 @@ static ObjString *allocateString(char *chars, int length, uint32_t hash)
     // intern the string
     // add it to the vm strings table to ensure there are no duplicates
     // ie we use table as a hash set (only care about keys so set value to nil)
+    push(OBJ_VAL(string)); // GC push and pop
     tableSet(&vm.strings, string, NIL_VAL);
+    pop(); // GC push and pop
     return string;
 }
 

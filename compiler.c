@@ -4,6 +4,7 @@
 
 #include "common.h"
 #include "compiler.h"
+#include "memory.h"
 #include "scanner.h"
 
 #ifdef DEBUG_PRINT_CODE
@@ -1280,4 +1281,17 @@ ObjFunction *compile(const char *source)
     printf("\ncompiler end reached\n");
     ObjFunction *function = endCompiler();    // emits an OP_RETURN
     return parser.hadError ? NULL : function; // only return function if there are no errors, so VM doesn't try and execute invalid bytecode
+}
+
+/*
+    the only object the compiler uses is the ObjFunction it is compiling into
+*/
+void markCompilerRoots()
+{
+    Compiler *compiler = current;
+    while (compiler != NULL)
+    {
+        markObject((Obj *)compiler->function);
+        compiler = compiler->enclosing;
+    }
 }

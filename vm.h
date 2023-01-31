@@ -39,7 +39,14 @@ typedef struct
     Table globals;            /* hash table of all global variables*/
     Table strings;            /* hash table of all strings. To support string interning */
     ObjUpvalue *openUpvalues; /* open upvalues reference local variables further down the stack */
-    Obj *objects;             /* linked list of all the objects on the heap */
+
+    size_t bytesAllocated; /* total number of bytes of managed memory the VM has allocated */
+    size_t nextGC;         /* threshold that triggers the next collection */
+    Obj *objects;          /* linked list of all the objects on the heap */
+
+    int grayCount;
+    int grayCapacity;
+    Obj **grayStack; // list of all gray objects (GC has visited and marked them, but not their decendants)
 } VM;
 
 typedef enum

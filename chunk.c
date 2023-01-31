@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include "chunk.h"
 #include "memory.h"
+#include "vm.h"
 
 /* Chunk is a sequence of bytecode */
 
@@ -39,6 +40,8 @@ void writeChunk(Chunk *chunk, uint8_t byte, int line)
 
 int addConstant(Chunk *chunk, Value value)
 {
+    push(value); // GC push and pop
     writeValueArray(&chunk->constants, value);
+    pop(); // GC push and pop
     return chunk->constants.count - 1;
 }

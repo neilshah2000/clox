@@ -217,3 +217,33 @@ ObjString *tableFindString(Table *table, const char *chars, int length, uint32_t
         index = (index + 1) % table->capacity;
     }
 }
+
+/*
+    clear table is special because of weak references
+*/
+void tableRemoveWhite(Table *table)
+{
+    for (int i = 0; i < table->capacity; i++)
+    {
+        Entry *entry = &table->entries[i];
+        if (entry->key != NULL && !entry->key->obj.isMarked)
+        {
+            tableDelete(table, entry->key); // delete from hash table so we don't see any dangling pointers
+        }
+    }
+}
+
+/*
+    mark for GC
+*/
+void markTable(Table *table)
+{
+    // mark all the values in the table
+    // also mark the keys since the GC manages those strings too
+    for (int i = 0; i < table->capacity; i++)
+    {
+        Entry *entry = &table->entries[i];
+        markObject((Obj *)entry->key);
+        markValue(entry->value);
+    }
+}

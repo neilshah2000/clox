@@ -32,6 +32,7 @@ typedef enum
 struct Obj
 {
     ObjType type;
+    bool isMarked;    // for GC
     struct Obj *next; /* make it a linked list so we can reclaim all the memory later */
 };
 
@@ -75,8 +76,8 @@ struct ObjString
 */
 typedef struct ObjUpvalue
 {
-    Obj obj; // base class for objects
-    Value *location; // pointer to closed over variable. allows variable in outer function to be assigned to 
+    Obj obj;         // base class for objects
+    Value *location; // pointer to closed over variable. allows variable in outer function to be assigned to
     Value closed;
     struct ObjUpvalue *next; // make upvalues a linked list
 } ObjUpvalue;
