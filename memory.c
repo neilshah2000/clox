@@ -23,7 +23,7 @@ void *reallocate(void *pointer, size_t oldSize, size_t newSize)
 
         if (vm.bytesAllocated > vm.nextGC)
         {
-            collectGarbage();
+            // collectGarbage();
         }
     }
 
@@ -92,6 +92,11 @@ static void markArray(ValueArray *array)
     }
 }
 
+/*
+    Visit all the referenced objects that this object contains
+    and mark them so the GC doesn't collect them.
+    Once that's done this object becomes 'black' (from grey)
+*/
 static void blackenObject(Obj *object)
 {
 #ifdef DEBUG_LOG_GC
@@ -102,6 +107,13 @@ static void blackenObject(Obj *object)
 
     switch (object->type)
     {
+    case OBJ_CLASS:
+    {
+        // mark the name to keep that string alive
+        ObjClass *klass = (ObjClass *)object;
+        markObject((Obj *)klass->name);
+        break;
+    }
     case OBJ_CLOSURE:
     {
         // mark references to the bare function and upvalues it captures
@@ -143,6 +155,11 @@ static void freeObject(Obj *object)
 
     switch (object->type)
     {
+    case OBJ_CLASS:
+    {
+        FREE(ObjClass, object);
+        break;
+    }
     case OBJ_CLOSURE:
     {
         // free upvalue array

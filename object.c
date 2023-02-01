@@ -27,6 +27,16 @@ static Obj *allocateObject(size_t size, ObjType type)
 }
 
 /*
+    create a class
+*/
+ObjClass *newClass(ObjString *name)
+{
+    ObjClass *klass = ALLOCATE_OBJ(ObjClass, OBJ_CLASS);
+    klass->name = name;
+    return klass;
+}
+
+/*
     takes a pointer to the ObjFunction it wraps
     also initializes the type field to the new type;
 */
@@ -165,6 +175,11 @@ void printObject(Value value)
 {
     switch (OBJ_TYPE(value))
     {
+    case OBJ_CLASS:
+    {
+        printf("%s", AS_CLASS(value)->name->chars);
+        break;
+    }
     case OBJ_CLOSURE:
     {
         printFunction(AS_CLOSURE(value)->function);

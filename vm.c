@@ -561,6 +561,13 @@ static InterpretResult run()
             push(result);
             // update run() functions cached pointer to the current frame
             frame = &vm.frames[vm.frameCount - 1];
+            break;
+        }
+        case OP_CLASS:
+        {
+            // read class name string from constants table and create a class object
+            push(OBJ_VAL(newClass(READ_STRING())));
+            break;
         }
         }
     }

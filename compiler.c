@@ -954,6 +954,22 @@ static void function(FunctionType type)
 }
 
 /*
+    class declarations are statements
+*/
+static void classDeclaration()
+{
+    consume(TOKEN_IDENTIFIER, "Expect class name");
+    uint8_t nameConstant = identifierConstant(&parser.previous); // take name and add to surrounding functions constants table
+    declareVariable();                                           // bind the class object to a variable of the same name
+
+    emitBytes(OP_CLASS, nameConstant); // instruction to create class at runtime
+    defineVariable(nameConstant);      // cant user a variable until its defined
+
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
+}
+
+/*
     Functions are first class values
     Store function in a newly declared variable
 */
@@ -1193,7 +1209,11 @@ static void synchronize()
 */
 static void declaration()
 {
-    if (match(TOKEN_FUN))
+    if (match(TOKEN_CLASS))
+    {
+        classDeclaration();
+    }
+    else if (match(TOKEN_FUN))
     {
         funDeclaration();
     }
