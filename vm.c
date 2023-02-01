@@ -406,6 +406,45 @@ static InterpretResult run()
             *frame->closure->upvalues[slot]->location = peek(0);
             break;
         }
+        case OP_GET_PROPERTY:
+        {
+
+            if (!IS_INSTANCE(peek(0)))
+            {
+                runtimeError("Only instances have properties.");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+
+            ObjInstance *instance = AS_INSTANCE(peek(0));
+            ObjString *name = READ_STRING();
+
+            Value value;
+            if (tableGet(&instance->fields, name, &value))
+            {
+                pop(); // Instance.
+                push(value);
+                break;
+            }
+
+            // field doesnt exist
+            runtimeError("Undefined property '%s'.", name->chars);
+            return INTERPRET_RUNTIME_ERROR;
+        }
+        case OP_SET_PROPERTY:
+        {
+            if (!IS_INSTANCE(peek(1)))
+            {
+                runtimeError("Only instances have fields.");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+
+            ObjInstance *instance = AS_INSTANCE(peek(1));
+            tableSet(&instance->fields, READ_STRING(), peek(0));
+            Value value = pop();
+            pop();       // pop the instance to remove it
+            push(value); // put the value back on the stack
+            break;
+        }
         case OP_EQUAL:
         {
             Value b = pop();
