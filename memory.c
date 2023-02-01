@@ -23,7 +23,7 @@ void *reallocate(void *pointer, size_t oldSize, size_t newSize)
 
         if (vm.bytesAllocated > vm.nextGC)
         {
-            // collectGarbage();
+            collectGarbage();
         }
     }
 
@@ -132,6 +132,14 @@ static void blackenObject(Obj *object)
         ObjFunction *function = (ObjFunction *)object;
         markObject((Obj *)function->name);
         markArray(&function->chunk.constants);
+        break;
+    }
+    case OBJ_INSTANCE:
+    {
+        ObjInstance *instance = (ObjInstance *)object;
+        markObject((Obj *)instance->klass);
+        markTable(&instance->fields); // keep every object referenced by the instance's fields
+        break;
     }
     case OBJ_UPVALUE:
     {
@@ -176,6 +184,13 @@ static void freeObject(Obj *object)
         ObjFunction *function = (ObjFunction *)object;
         freeChunk(&function->chunk);
         FREE(ObjFunction, object);
+        break;
+    }
+    case OBJ_INSTANCE:
+    {
+        ObjInstance *instance = (ObjInstance *)object;
+        freeTable(&instance->fields); // instance owns the table so free it as well
+        FREE(ObjInstance, object);
         break;
     }
     case OBJ_NATIVE:

@@ -147,6 +147,7 @@ static bool call(ObjClosure *closure, int argCount)
 
 /*
     Only allow calls to functions and other callable values
+    Class names are called to create instances
 */
 static bool callValue(Value callee, int argCount)
 {
@@ -154,6 +155,13 @@ static bool callValue(Value callee, int argCount)
     {
         switch (OBJ_TYPE(callee))
         {
+        case OBJ_CLASS:
+        {
+            ObjClass *klass = AS_CLASS(callee);
+            // create new instance and store on the stack
+            vm.stackTop[-argCount - 1] = OBJ_VAL(newInstance(klass));
+            return true;
+        }
         case OBJ_CLOSURE:
         {
             return call(AS_CLOSURE(callee), argCount);
