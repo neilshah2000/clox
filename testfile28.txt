@@ -1,0 +1,11 @@
+class CoffeeMaker {
+    init(coffee) {
+        print this;
+    }
+
+    brew() {}
+
+}
+
+var maker = CoffeeMaker("coffee and chicory");
+maker.brew();

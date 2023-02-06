@@ -38,6 +38,7 @@ typedef struct
     Value *stackTop;          /* direct pointer faster than index */
     Table globals;            /* hash table of all global variables*/
     Table strings;            /* hash table of all strings. To support string interning */
+    ObjString *initString;    /* name of class initializer method*/
     ObjUpvalue *openUpvalues; /* open upvalues reference local variables further down the stack */
 
     size_t bytesAllocated; /* total number of bytes of managed memory the VM has allocated */

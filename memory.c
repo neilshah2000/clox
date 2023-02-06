@@ -107,11 +107,20 @@ static void blackenObject(Obj *object)
 
     switch (object->type)
     {
+    case OBJ_BOUND_METHOD:
+    {
+        ObjBoundMethod *bound = (ObjBoundMethod *)object;
+        markValue(bound->receiver);
+        markObject((Obj *)bound->method);
+        break;
+    }
     case OBJ_CLASS:
     {
         // mark the name to keep that string alive
         ObjClass *klass = (ObjClass *)object;
         markObject((Obj *)klass->name);
+        // keep methods around too
+        markTable(&klass->methods);
         break;
     }
     case OBJ_CLOSURE:
@@ -163,8 +172,17 @@ static void freeObject(Obj *object)
 
     switch (object->type)
     {
+    case OBJ_BOUND_METHOD:
+    {
+        // doesn't own any of its references so only frees itself
+        FREE(ObjBoundMethod, object);
+        break;
+    }
     case OBJ_CLASS:
     {
+        // class owns the method table so free memory for it
+        ObjClass *klass = (ObjClass *)object;
+        freeTable(&klass->methods);
         FREE(ObjClass, object);
         break;
     }
@@ -243,6 +261,7 @@ static void markRoots()
     markTable(&vm.globals);
     // compiler itself periodically grabs memory from the heap for literals and constants table
     markCompilerRoots();
+    markObject((Obj *)vm.initString); // class initializer method name
 }
 
 /*

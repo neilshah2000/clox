@@ -26,6 +26,14 @@ static Obj *allocateObject(size_t size, ObjType type)
     return object;
 }
 
+ObjBoundMethod *newBoundMethod(Value receiver, ObjClosure *method)
+{
+    ObjBoundMethod *bound = ALLOCATE_OBJ(ObjBoundMethod, OBJ_BOUND_METHOD);
+    bound->receiver = receiver;
+    bound->method = method;
+    return bound;
+}
+
 /*
     create a class
 */
@@ -33,6 +41,7 @@ ObjClass *newClass(ObjString *name)
 {
     ObjClass *klass = ALLOCATE_OBJ(ObjClass, OBJ_CLASS);
     klass->name = name;
+    initTable(&klass->methods);
     return klass;
 }
 
@@ -94,6 +103,7 @@ static ObjString *allocateString(char *chars, int length, uint32_t hash)
     string->length = length;
     string->chars = chars;
     string->hash = hash;
+
     // intern the string
     // add it to the vm strings table to ensure there are no duplicates
     // ie we use table as a hash set (only care about keys so set value to nil)
@@ -147,7 +157,6 @@ ObjString *copyString(const char *chars, int length)
     ObjString *interned = tableFindString(&vm.strings, chars, length, hash);
     if (interned != NULL)
     {
-        printf("\nfound interned string\n");
         return interned;
     }
 
@@ -183,6 +192,11 @@ void printObject(Value value)
 {
     switch (OBJ_TYPE(value))
     {
+    case OBJ_BOUND_METHOD:
+    {
+        printFunction(AS_BOUND_METHOD(value)->method->function);
+        break;
+    }
     case OBJ_CLASS:
     {
         printf("%s", AS_CLASS(value)->name->chars);

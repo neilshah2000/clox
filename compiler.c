@@ -77,6 +77,8 @@ typedef struct
 typedef enum
 {
     TYPE_FUNCTION,
+    TYPE_INITIALIZER,
+    TYPE_METHOD,
     TYPE_SCRIPT
 } FunctionType;
 
@@ -98,10 +100,20 @@ typedef struct Compiler
     int scopeDepth;                // number of blocks surrounding the CURRENT bit of code we're compiling
 } Compiler;
 
+/*
+    Nested linked list of enclosing classes
+*/
+typedef struct ClassCompiler
+{
+    struct ClassCompiler *enclosing;
+} ClassCompiler;
+
 // single global parser variable so dont have to pass around different functions
 Parser parser;
 // global Compiler pointer but Compiler itself is stored on the stack in compiler() function
 Compiler *current = NULL;
+// points to the struct representing the current, innermost class being compiled
+ClassCompiler *currentClass = NULL;
 
 /*
     The current chunk is always the chunk owned by the function we're in the middle of compiling
@@ -255,7 +267,15 @@ static int emitJump(uint8_t instruction)
 
 static void emitReturn()
 {
-    emitByte(OP_NIL);
+    if (current->type == TYPE_INITIALIZER)
+    {
+        emitBytes(OP_GET_LOCAL, 0); // load slot 0 which contains the instance
+    }
+    else
+    {
+        emitByte(OP_NIL);
+    }
+
     emitByte(OP_RETURN);
 }
 
@@ -319,8 +339,19 @@ static void initCompiler(Compiler *compiler, FunctionType type)
     Local *local = &current->locals[current->localCount++];
     local->depth = 0;
     local->isCaptured = false;
-    local->name.start = "";
-    local->name.length = 0;
+
+    // store 'this' in the zero slot
+    // we only want to do this for methods
+    if (type != TYPE_FUNCTION)
+    {
+        local->name.start = "this";
+        local->name.length = 4;
+    }
+    else
+    {
+        local->name.start = "";
+        local->name.length = 0;
+    }
 }
 
 /*
@@ -389,7 +420,10 @@ static void parsePrecedence(Precedence precedence);
 */
 static uint8_t identifierConstant(Token *name)
 {
-    return makeConstant(OBJ_VAL(copyString(name->start, name->length)));
+    ObjString *copiedString = copyString(name->start, name->length);
+    Value myVal = OBJ_VAL(copiedString);
+    uint8_t constant = makeConstant(myVal);
+    return constant;
 }
 
 static bool identifiersEqual(Token *a, Token *b)
@@ -675,14 +709,26 @@ static void call(bool canAssign)
 static void dot(bool canAssign)
 {
     consume(TOKEN_IDENTIFIER, "Expect property name after '.'.");
+
+    // parse the property name
     uint8_t name = identifierConstant(&parser.previous);
 
-    if (canAssign && match(TOKEN_EQUAL))
+    if (canAssign && match(TOKEN_EQUAL)) // find '=' so we have a setter
     {
         expression();
         emitBytes(OP_SET_PROPERTY, name);
     }
-    else
+    else if (match(TOKEN_LEFT_PAREN)) // find a '(' so we have method call
+    {
+        uint8_t argCount = argumentList();
+        // OP_INVOKE = OP_GET_PROPERTY + OP_CALL
+        // takes 2 operands
+        // 1) index of propertyn name in constants table
+        // 2) number of arguments passed to method
+        emitBytes(OP_INVOKE, name);
+        emitByte(argCount);
+    }
+    else // access method without calling it, for invocation later
     {
         emitBytes(OP_GET_PROPERTY, name);
     }
@@ -792,6 +838,17 @@ static void variable(bool canAssign)
     namedVariable(parser.previous, canAssign);
 }
 
+static void this_(bool canAssign)
+{
+    if (currentClass == NULL)
+    {
+        error("Can't use 'this' outside of a class.");
+        return;
+    }
+
+    variable(false); // can't assign to this so pass false to disallow
+}
+
 static void unary(bool canAssign)
 {
     // the leading '-' token has been consumed and is sitting in previous
@@ -854,7 +911,7 @@ ParseRule rules[] = {
     [TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
     [TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
     [TOKEN_SUPER] = {NULL, NULL, PREC_NONE},
-    [TOKEN_THIS] = {NULL, NULL, PREC_NONE},
+    [TOKEN_THIS] = {this_, NULL, PREC_NONE},
     [TOKEN_TRUE] = {literal, NULL, PREC_NONE},
     [TOKEN_VAR] = {NULL, NULL, PREC_NONE},
     [TOKEN_WHILE] = {NULL, NULL, PREC_NONE},
@@ -969,20 +1026,56 @@ static void function(FunctionType type)
     }
 }
 
+static void method()
+{
+    consume(TOKEN_IDENTIFIER, "Expect method name.");
+    // add method to constants table
+    uint8_t constant = identifierConstant(&parser.previous);
+
+    // create function and leave at the top of the stack for the runtime to find
+    FunctionType type = TYPE_METHOD;
+    // check if we are in an initilaizer
+    if (parser.previous.length == 4 && memcmp(parser.previous.start, "init", 4) == 0)
+    {
+        type = TYPE_INITIALIZER;
+    }
+    function(type);
+
+    // emit OP_METHOD instruction with the index of the name in the constants table as an operand
+    emitBytes(OP_METHOD, constant);
+}
+
 /*
     class declarations are statements
 */
 static void classDeclaration()
 {
     consume(TOKEN_IDENTIFIER, "Expect class name");
+    Token className = parser.previous;                           // capture class name
     uint8_t nameConstant = identifierConstant(&parser.previous); // take name and add to surrounding functions constants table
     declareVariable();                                           // bind the class object to a variable of the same name
 
     emitBytes(OP_CLASS, nameConstant); // instruction to create class at runtime
     defineVariable(nameConstant);      // cant user a variable until its defined
 
+    // push a new ClassCompiler onto the implicit linked list
+    ClassCompiler classCompiler;
+    classCompiler.enclosing = currentClass;
+    currentClass = &classCompiler;
+
+    namedVariable(className, false); // load class to top of the stack
     consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+    // Lox doesnt have field declaration so everything before the closing brace must be a class
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF))
+    {
+        method();
+    }
+
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
+    emitByte(OP_POP); // once we reach the end of the methods, we no longer need the class declaration and tell teh VM to pop it off the stack
+
+    // pop the compiler off the stack and restore the enclosing one
+    currentClass = currentClass->enclosing;
 }
 
 /*
@@ -1156,6 +1249,10 @@ static void returnStatement()
     }
     else
     {
+        if (current->type == TYPE_INITIALIZER)
+        {
+            error("Can't return a value from an initializer.");
+        }
         // otherwise compile the return value expression
         expression();
         consume(TOKEN_SEMICOLON, "Expect ';' after return value.");

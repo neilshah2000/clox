@@ -34,10 +34,12 @@ typedef enum
     OP_JUMP_IF_FALSE, // jump on condition
     OP_LOOP,          // always jump (but back not forwards)
     OP_CALL,          // function calls
+    OP_INVOKE,        // method access and immediate method call
     OP_CLOSURE,       // takes a single operand that represents a constant table index for the function. Actually unusual because does more than that
     OP_CLOSE_UPVALUE, // when a stack variable moves to heap because of closures
     OP_RETURN,
     OP_CLASS,
+    OP_METHOD
 } OpCode;
 
 /* chunk is a sequence of bytecode */

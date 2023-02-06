@@ -1,0 +1,7 @@
+class Person {
+ 
+}
+
+var jane = Person();
+jane.name = 1;
+jane.test = 2;

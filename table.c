@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "memory.h"
 #include "object.h"
@@ -19,6 +20,33 @@ void freeTable(Table *table)
 {
     FREE_ARRAY(Entry, table->entries, table->capacity);
     initTable(table);
+}
+
+static void printTable(Table *table)
+{
+    printf("**************\n");
+    printf("Table count %d\n", table->count);
+    printf("Table capacity %d\n", table->capacity);
+    printf("Table entries\n");
+    for (int i = 0; i < table->count; i++)
+    {
+        Entry *entry = &table->entries[i];
+        if (entry->key == NULL)
+        {
+            printf("%d) ", i);
+            printf("found null key - ");
+            printValue(entry->value);
+            printf("\n");
+        }
+        else
+        {
+            printf("%d) ", i);
+            printf("%s - ", table->entries[i].key->chars);
+            printValue(table->entries[i].value);
+            printf("\n");
+        }
+    }
+    printf("***************\n");
 }
 
 /*
@@ -111,7 +139,7 @@ static void adjustCapacity(Table *table, int capacity)
         ///////// skip over rest ////////////////////////////
 
         // find the entry in the NEW array
-        Entry *dest = findEntry(entries, capacity, entries->key);
+        Entry *dest = findEntry(entries, capacity, entry->key);
         dest->key = entry->key;
         dest->value = entry->value;
         // recount to adjust for removed tombstones
@@ -148,6 +176,7 @@ bool tableSet(Table *table, ObjString *key, Value value)
 
     entry->key = key;
     entry->value = value;
+
     return isNewKey;
 }
 

@@ -1,0 +1,6 @@
+class Person {
+ 
+}
+
+var jane = Person();
+jane.name = "Jane";
