@@ -106,6 +106,7 @@ typedef struct Compiler
 typedef struct ClassCompiler
 {
     struct ClassCompiler *enclosing;
+    bool hasSuperclass;
 } ClassCompiler;
 
 // single global parser variable so dont have to pass around different functions
@@ -838,6 +839,49 @@ static void variable(bool canAssign)
     namedVariable(parser.previous, canAssign);
 }
 
+/*
+    create synthetic token for the given constant string
+*/
+static Token syntheticToken(const char *text)
+{
+    Token token;
+    token.start = text;
+    token.length = (int)strlen(text);
+    return token;
+}
+
+static void super_(bool canAssign)
+{
+    if (currentClass == NULL)
+    {
+        error("Can't use 'super' outside of a class.");
+    }
+    else if (!currentClass->hasSuperclass)
+    {
+        error("Can't use 'super' in a class with no superclass.");
+    }
+
+    // dot and method names are inseperable parts of the syntax
+    consume(TOKEN_DOT, "Expect '.' after 'super'.");             // lookup current receiver in the hidden variable 'this' and push onto stack
+    consume(TOKEN_IDENTIFIER, "Expect superclass method name."); // look up the superclass from its 'super' variable and push that on top
+    uint8_t name = identifierConstant(&parser.previous);
+
+    namedVariable(syntheticToken("this"), false);
+    if (match(TOKEN_LEFT_PAREN))
+    {
+        // if we see a parenthesized argument list, combine OP_GET_SUPER and OP_CALL into a single instruction
+        uint8_t argCount = argumentList();
+        namedVariable(syntheticToken("super"), false);
+        emitBytes(OP_SUPER_INVOKE, name);
+        emitByte(argCount);
+    }
+    else
+    {
+        namedVariable(syntheticToken("super"), false);
+        emitBytes(OP_GET_SUPER, name);
+    }
+}
+
 static void this_(bool canAssign)
 {
     if (currentClass == NULL)
@@ -910,7 +954,7 @@ ParseRule rules[] = {
     [TOKEN_OR] = {NULL, or_, PREC_OR},
     [TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
     [TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
-    [TOKEN_SUPER] = {NULL, NULL, PREC_NONE},
+    [TOKEN_SUPER] = {super_, NULL, PREC_NONE},
     [TOKEN_THIS] = {this_, NULL, PREC_NONE},
     [TOKEN_TRUE] = {literal, NULL, PREC_NONE},
     [TOKEN_VAR] = {NULL, NULL, PREC_NONE},
@@ -1060,8 +1104,30 @@ static void classDeclaration()
 
     // push a new ClassCompiler onto the implicit linked list
     ClassCompiler classCompiler;
+    classCompiler.hasSuperclass = false;
     classCompiler.enclosing = currentClass;
     currentClass = &classCompiler;
+
+    // after compiling class name, if next token i '>', we found a superclass clause
+    if (match(TOKEN_LESS))
+    {
+        consume(TOKEN_IDENTIFIER, "Expect superclass name");
+        variable(false); // looks up superclass by name and pushes it onto the stack
+
+        if (identifiersEqual(&className, &parser.previous))
+        {
+            error("A class can't inherit ffrom itself");
+        }
+
+        // each subclass has a hidden variable storing a reference to its superclass
+        beginScope();
+        addLocal(syntheticToken("super"));
+        defineVariable(0);
+
+        namedVariable(className, false); // load subclass doing the inheriting into the stack
+        emitByte(OP_INHERIT);            // wires up the superclass to the new subclass
+        classCompiler.hasSuperclass = true;
+    }
 
     namedVariable(className, false); // load class to top of the stack
     consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
@@ -1073,6 +1139,11 @@ static void classDeclaration()
 
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
     emitByte(OP_POP); // once we reach the end of the methods, we no longer need the class declaration and tell teh VM to pop it off the stack
+
+    if (classCompiler.hasSuperclass)
+    {
+        endScope();
+    }
 
     // pop the compiler off the stack and restore the enclosing one
     currentClass = currentClass->enclosing;

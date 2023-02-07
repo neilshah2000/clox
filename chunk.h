@@ -20,6 +20,7 @@ typedef enum
     OP_SET_UPVALUE,
     OP_GET_PROPERTY,
     OP_SET_PROPERTY,
+    OP_GET_SUPER,
     OP_EQUAL,
     OP_GREATER,
     OP_LESS,
@@ -35,10 +36,12 @@ typedef enum
     OP_LOOP,          // always jump (but back not forwards)
     OP_CALL,          // function calls
     OP_INVOKE,        // method access and immediate method call
+    OP_SUPER_INVOKE,
     OP_CLOSURE,       // takes a single operand that represents a constant table index for the function. Actually unusual because does more than that
     OP_CLOSE_UPVALUE, // when a stack variable moves to heap because of closures
     OP_RETURN,
     OP_CLASS,
+    OP_INHERIT,
     OP_METHOD
 } OpCode;
 
